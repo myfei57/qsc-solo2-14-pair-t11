@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BreweryCtl · 告警与审计</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>BreweryCtl 告警与审计</h1>
+      <nav>
+        <a href="/mash">糖化</a>
+        <a href="/ferment">发酵</a>
+        <a href="/cip">清洗 CIP</a>
+        <a class="active" href="/alarms">告警与审计</a>
+      </nav>
+    </header>
+    <div class="banner">
+      在制批次 <strong id="banner-batches">-</strong>
+      占用罐体 <strong id="banner-tanks">-</strong>
+      活跃告警 <strong id="banner-alarms">-</strong>
+      闩锁 <strong id="banner-latches">-</strong>
+    </div>
+    <main>
+      <section>
+        <h2>告警列表</h2>
+        <label for="alarm-status">状态过滤</label>
+        <select id="alarm-status" onchange="loadAlarms()">
+          <option value="active">active</option>
+          <option value="acknowledged">acknowledged</option>
+          <option value="resolved">resolved</option>
+          <option value="">全部</option>
+        </select>
+        <label for="operator">操作员</label>
+        <input id="operator" value="console" />
+        <button class="secondary" onclick="loadAlarms()">刷新告警</button>
+        <table>
+          <thead>
+            <tr>
+              <th>等级</th>
+              <th>来源</th>
+              <th>内容</th>
+              <th>状态</th>
+              <th>闩锁</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="alarm-rows"></tbody>
+        </table>
+        <pre id="alarm-summary">尚未加载</pre>
+        <div id="alarm-log"></div>
+      </section>
+
+      <section>
+        <h2>批次审计</h2>
+        <label for="audit-batch-select">批次</label>
+        <select id="audit-batch-select"></select>
+        <button onclick="run(loadAudit, 'audit-log')">查询审计</button>
+        <pre id="audit-view">尚未加载</pre>
+        <div id="audit-log"></div>
+      </section>
+
+      <section>
+        <h2>接口清单</h2>
+        <button class="secondary" onclick="run(async () => write('api-view', await apiGet('/api/pages')), 'api-log')">加载接口目录</button>
+        <pre id="api-view">尚未加载</pre>
+        <div id="api-log"></div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+    <script>
+      initAlarmsPage();
+    </script>
+  </body>
+</html>

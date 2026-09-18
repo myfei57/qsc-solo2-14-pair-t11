@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BreweryCtl · 清洗 CIP</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>BreweryCtl 清洗 CIP</h1>
+      <nav>
+        <a href="/mash">糖化</a>
+        <a href="/ferment">发酵</a>
+        <a class="active" href="/cip">清洗 CIP</a>
+        <a href="/alarms">告警与审计</a>
+      </nav>
+    </header>
+    <div class="banner">
+      在制批次 <strong id="banner-batches">-</strong>
+      占用罐体 <strong id="banner-tanks">-</strong>
+      活跃告警 <strong id="banner-alarms">-</strong>
+      闩锁 <strong id="banner-latches">-</strong>
+    </div>
+    <main>
+      <section>
+        <h2>清洗流程</h2>
+        <label for="tank-select">发酵罐</label>
+        <select id="tank-select" onchange="refreshCertificate()"></select>
+        <label for="operator">操作员</label>
+        <input id="operator" value="console" />
+        <label for="cycle-id">清洗过程 ID</label>
+        <input id="cycle-id" placeholder="start 之后自动填入" />
+        <button
+          onclick="run(async () => { const payload = await apiPost('/api/maintenance/tanks/' + value('tank-select') + '/clean', { operator: value('operator') }); element('cycle-id').value = payload.cycle.id; return payload; }, 'cip-log', refreshCertificate)"
+        >
+          开始清洗
+        </button>
+        <button
+          onclick="run(() => apiPost('/api/maintenance/cycles/' + value('cycle-id') + '/advance', { operator: value('operator') }), 'cip-log', refreshCertificate)"
+        >
+          推进下一步
+        </button>
+        <button
+          onclick="run(() => apiPost('/api/maintenance/cycles/' + value('cycle-id') + '/finish', { operator: value('operator') }), 'cip-log', refreshCertificate)"
+        >
+          完成清洗并签发凭证
+        </button>
+        <div id="cip-log"></div>
+      </section>
+
+      <section>
+        <h2>凭证状态</h2>
+        <button class="secondary" onclick="refreshCertificate()">刷新</button>
+        <pre id="certificate-view">尚未加载</pre>
+      </section>
+
+      <section>
+        <h2>回路冲洗</h2>
+        <label for="circuit-id">CIP 回路 ID</label>
+        <input id="circuit-id" placeholder="从 /api/state 或 bootstrap 日志获取" />
+        <label for="flush-flow">冲洗流量 (m³/h)</label>
+        <input id="flush-flow" type="number" step="0.5" value="10" />
+        <button
+          onclick="run(() => apiPost('/api/maintenance/circuits/' + value('circuit-id') + '/flush', { flow_m3h: numberValue('flush-flow'), operator: value('operator') }), 'cip-log')"
+        >
+          执行 15 分钟冲洗核算
+        </button>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+    <script>
+      initCipPage();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BreweryCtl · 糖化控制</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>BreweryCtl 糖化控制</h1>
+      <nav>
+        <a class="active" href="/mash">糖化</a>
+        <a href="/ferment">发酵</a>
+        <a href="/cip">清洗 CIP</a>
+        <a href="/alarms">告警与审计</a>
+      </nav>
+    </header>
+    <div class="banner">
+      在制批次 <strong id="banner-batches">-</strong>
+      占用罐体 <strong id="banner-tanks">-</strong>
+      活跃告警 <strong id="banner-alarms">-</strong>
+      闩锁 <strong id="banner-latches">-</strong>
+      批次数 <strong id="banner-store">-</strong>
+    </div>
+    <main>
+      <section>
+        <h2>批次选择</h2>
+        <label for="batch-select">当前批次</label>
+        <select id="batch-select" onchange="refreshBatch()"></select>
+        <label for="operator">操作员</label>
+        <input id="operator" value="console" />
+        <button class="secondary" onclick="refreshBatch()">刷新批次详情</button>
+        <pre id="batch-view">尚未加载</pre>
+      </section>
+
+      <section>
+        <h2>糖化步骤</h2>
+        <label for="water-temp">投料水温 (℃)</label>
+        <input id="water-temp" type="number" step="0.1" value="65" />
+        <label for="probe-select">水温探头</label>
+        <select id="probe-select">
+          <option value="">自动选择</option>
+        </select>
+        <button
+          onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/water', { temp_c: numberValue('water-temp'), probe_id: value('probe-select') || 'probe-mash', actor: value('operator') }), 'mash-log', refreshBatch)"
+        >
+          确认水温并落盘
+        </button>
+        <label for="grain-kg">投料量 (kg)</label>
+        <input id="grain-kg" type="number" step="0.5" value="220" />
+        <button
+          onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/charge', { grain_kg: numberValue('grain-kg'), actor: value('operator') }), 'mash-log', refreshBatch)"
+        >
+          投料
+        </button>
+        <div class="inline">
+          <div>
+            <label for="setpoint">升温设定 (℃)</label>
+            <input id="setpoint" type="number" step="0.5" value="65" />
+            <button
+              onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/heat', { setpoint_c: numberValue('setpoint'), actor: value('operator') }), 'mash-log', refreshBatch)"
+            >
+              开始升温
+            </button>
+          </div>
+          <div>
+            <label for="actual-temp">实际温度 (℃)</label>
+            <input id="actual-temp" type="number" step="0.1" value="65" />
+            <button
+              onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/rest', { actual_temp_c: numberValue('actual-temp'), actor: value('operator') }), 'mash-log', refreshBatch)"
+            >
+              进入保温
+            </button>
+          </div>
+        </div>
+        <div class="inline">
+          <div>
+            <label for="gravity">麦汁浓度 (°P)</label>
+            <input id="gravity" type="number" step="0.1" value="12.1" />
+          </div>
+          <div>
+            <label for="runoff">过滤体积 (L)</label>
+            <input id="runoff" type="number" step="1" value="1020" />
+          </div>
+        </div>
+        <label for="ph">pH</label>
+        <input id="ph" type="number" step="0.1" value="5.4" />
+        <button
+          onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/filter', { gravity_plato: numberValue('gravity'), volume_l: numberValue('runoff'), ph: numberValue('ph'), actor: value('operator') }), 'mash-log', refreshBatch)"
+        >
+          过滤并转入煮沸
+        </button>
+        <button class="secondary" onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/abort', { reason: '控制台中止', actor: value('operator') }), 'mash-log', refreshBatch)">
+          中止批次
+        </button>
+        <div id="mash-log"></div>
+      </section>
+
+      <section>
+        <h2>新建批次</h2>
+        <label for="recipe-select">已发布配方</label>
+        <select id="recipe-select"></select>
+        <label for="batch-volume">目标体积 (L)</label>
+        <input id="batch-volume" type="number" step="10" value="1000" />
+        <button
+          onclick="run(async () => { const payload = await apiPost('/api/batches', { recipe_id: value('recipe-select'), volume_l: numberValue('batch-volume'), actor: value('operator'), priority: 'normal' }); await loadBatches('batch-select'); return payload; }, 'mash-log', refreshBatch)"
+        >
+          创建批次
+        </button>
+        <pre id="recipe-view">尚未加载</pre>
+      </section>
+
+      <section>
+        <h2>存储状态</h2>
+        <pre id="store-view">尚未加载</pre>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+    <script>
+      initMashPage();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,172 @@
+:root {
+  color-scheme: light;
+  --bg: #f5f2e9;
+  --panel: #ffffff;
+  --ink: #26221c;
+  --muted: #6d6459;
+  --line: #ded6c6;
+  --accent: #b3651f;
+  --ok: #2f7a4f;
+  --warn: #b5851f;
+  --bad: #a8342c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+header {
+  background: #3b2a17;
+  color: #f8f2e6;
+  padding: 18px 24px 12px;
+}
+
+header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+nav a {
+  color: #f6deba;
+  margin-right: 16px;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+nav a.active {
+  color: #ffffff;
+  border-bottom: 2px solid #f6deba;
+}
+
+main {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  padding: 18px 24px 40px;
+}
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+section h2 {
+  margin: 0 0 12px;
+  font-size: 17px;
+}
+
+label {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  width: 100%;
+}
+
+button {
+  margin-top: 10px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button.secondary {
+  background: #6d6459;
+}
+
+button:disabled {
+  background: #b9b2a6;
+  cursor: not-allowed;
+}
+
+pre {
+  background: #201a12;
+  color: #f4ead8;
+  padding: 10px;
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 280px;
+  font-size: 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 6px 4px;
+  text-align: left;
+}
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 10px 24px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.banner strong {
+  color: var(--ink);
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: #efe7d6;
+  font-size: 12px;
+}
+
+.pill.ok {
+  background: #dff1e4;
+  color: var(--ok);
+}
+
+.pill.warn {
+  background: #f8efcf;
+  color: var(--warn);
+}
+
+.pill.bad {
+  background: #f7dedb;
+  color: var(--bad);
+}
+
+.inline {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.log-entry {
+  border-left: 3px solid var(--accent);
+  padding-left: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}

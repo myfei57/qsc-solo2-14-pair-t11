@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BreweryCtl · 发酵控制</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>BreweryCtl 发酵控制</h1>
+      <nav>
+        <a href="/mash">糖化</a>
+        <a class="active" href="/ferment">发酵</a>
+        <a href="/cip">清洗 CIP</a>
+        <a href="/alarms">告警与审计</a>
+      </nav>
+    </header>
+    <div class="banner">
+      在制批次 <strong id="banner-batches">-</strong>
+      占用罐体 <strong id="banner-tanks">-</strong>
+      活跃告警 <strong id="banner-alarms">-</strong>
+      闩锁 <strong id="banner-latches">-</strong>
+    </div>
+    <main>
+      <section>
+        <h2>批次与罐体</h2>
+        <label for="batch-select">批次</label>
+        <select id="batch-select" onchange="refreshBatch()"></select>
+        <label for="tank-select">发酵罐</label>
+        <select id="tank-select" onchange="refreshTankSnapshot()"></select>
+        <label for="operator">操作员</label>
+        <input id="operator" value="console" />
+        <button class="secondary" onclick="refreshBatch(); refreshTankSnapshot();">刷新</button>
+        <pre id="batch-view">尚未加载</pre>
+        <pre id="tank-view">尚未加载</pre>
+      </section>
+
+      <section>
+        <h2>降温与转罐</h2>
+        <label for="cool-target">降温目标 (℃)</label>
+        <input id="cool-target" type="number" step="0.5" value="10" />
+        <button
+          onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/cool', { target_c: numberValue('cool-target'), actor: value('operator') }), 'ferment-log', refreshBatch)"
+        >
+          开始降温
+        </button>
+        <label for="cooled-value">当前麦汁温度 (℃)</label>
+        <input id="cooled-value" type="number" step="0.1" value="10" />
+        <button
+          onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/cooled', { value_c: numberValue('cooled-value'), actor: value('operator') }), 'ferment-log', refreshBatch)"
+        >
+          确认达到接种温度
+        </button>
+        <button
+          onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/transfer', { tank_id: value('tank-select'), actor: value('operator') }), 'ferment-log', refreshBatch)"
+        >
+          转入发酵罐
+        </button>
+        <div class="inline">
+          <div>
+            <label for="pitch-temp">接种温度 (℃)</label>
+            <input id="pitch-temp" type="number" step="0.1" value="10" />
+          </div>
+          <div>
+            <label for="pitch-volume">接种体积 (L)</label>
+            <input id="pitch-volume" type="number" step="10" value="1000" />
+          </div>
+        </div>
+        <button
+          onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/pitch', { tank_id: value('tank-select'), temp_c: numberValue('pitch-temp'), volume_l: numberValue('pitch-volume'), actor: value('operator') }), 'ferment-log', refreshBatch)"
+        >
+          接种酵母
+        </button>
+        <label for="mature-days">成熟天数</label>
+        <input id="mature-days" type="number" step="1" value="14" />
+        <button
+          onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/mature', { tank_id: value('tank-select'), days: numberValue('mature-days'), actor: value('operator') }), 'ferment-log', refreshBatch)"
+        >
+          进入成熟
+        </button>
+        <button class="secondary" onclick="run(() => apiPost('/api/batches/' + value('batch-select') + '/complete', { actor: value('operator') }), 'ferment-log', refreshBatch)">
+          完成批次
+        </button>
+        <div id="ferment-log"></div>
+      </section>
+
+      <section>
+        <h2>压力联锁</h2>
+        <label for="pressure-bar">罐压 (bar)</label>
+        <input id="pressure-bar" type="number" step="0.05" value="0.2" />
+        <button onclick="run(() => apiPost('/api/control/tanks/' + value('tank-select') + '/pressure', { pressure_bar: numberValue('pressure-bar'), actor: value('operator') }), 'pressure-log', refreshTankSnapshot)">
+          更新罐压
+        </button>
+        <label for="relieve-target">排气目标 (bar)</label>
+        <input id="relieve-target" type="number" step="0.05" value="0.1" />
+        <button class="secondary" onclick="run(() => apiPost('/api/control/tanks/' + value('tank-select') + '/relieve', { target_bar: numberValue('relieve-target'), actor: value('operator') }), 'pressure-log', refreshTankSnapshot)">
+          排气
+        </button>
+        <button class="secondary" onclick="run(() => apiPost('/api/control/tanks/' + value('tank-select') + '/latch/reset', { operator: value('operator') }), 'pressure-log', refreshTankSnapshot)">
+          复位闩锁
+        </button>
+        <div id="pressure-log"></div>
+      </section>
+
+      <section>
+        <h2>温度采样</h2>
+        <label for="probe-select">探头</label>
+        <input id="probe-select" value="probe-mash" />
+        <label for="reading-value">采样值 (℃)</label>
+        <input id="reading-value" type="number" step="0.1" value="10.2" />
+        <button onclick="run(submitReading, 'trend-log', loadTrend)">提交采样</button>
+        <button class="secondary" onclick="run(loadTrend, 'trend-log')">刷新趋势</button>
+        <pre id="trend-view">尚未加载</pre>
+        <pre id="reading-result"></pre>
+        <div id="trend-log"></div>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+    <script>
+      initFermentPage();
+    </script>
+  </body>
+</html>
