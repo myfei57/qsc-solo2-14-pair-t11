@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from ..core.clock import Clock, format_moment
 from ..core.errors import NotFoundError
@@ -13,6 +13,9 @@ from .models import AuditEntry
 
 AUDIT_ENTRIES = "audit_entries"
 
+#: 审计记录落盘后的回调（用于事件外发枢纽订阅）。
+AuditSink = Callable[[dict[str, Any]], None]
+
 
 class AuditLog:
     """记录不可变审计事实。"""
@@ -21,6 +24,12 @@ class AuditLog:
         self.store = store
         self.clock = clock
         self.entries = store.collection(AUDIT_ENTRIES)
+        self._sink: AuditSink | None = None
+
+    def set_sink(self, sink: AuditSink | None) -> None:
+        """挂接审计记录发布回调。"""
+
+        self._sink = sink
 
     def record(
         self,
@@ -41,7 +50,24 @@ class AuditLog:
             detail=dict(detail or {}),
             recorded_at=format_moment(self.clock.now()),
         )
-        return self.entries.put(entry.id, entry.to_doc())
+        document = self.entries.put(entry.id, entry.to_doc())
+        self._dispatch(document)
+        return document
+
+    def _dispatch(self, entry: dict[str, Any]) -> None:
+        """把已落盘记录交给发布回调；回调异常不得影响业务操作。"""
+
+        sink = self._sink
+        if sink is None:
+            return
+        try:
+            sink(entry)
+        except Exception:  # noqa: BLE001 - 外发链路故障不能反向打挂工艺操作
+            import logging
+
+            logging.getLogger("breweryctl.events").exception(
+                "审计事件发布失败 action=%s", entry.get("action")
+            )
 
     def history(self, batch_id: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
         """返回审计记录，可按批次过滤。"""

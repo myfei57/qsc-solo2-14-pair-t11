@@ -50,6 +50,7 @@ class Application:
         """启动控制台并阻塞在请求循环。"""
 
         self.bootstrap()
+        self.registry.start_relay()
         LOGGER.info("BreweryCtl 启动，数据目录 %s", self.settings.data_dir)
         try:
             self.server.start()

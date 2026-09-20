@@ -68,6 +68,10 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/api/alarms"),
     ("POST", "/api/alarms/{alarm_id}/ack"),
     ("POST", "/api/alarms/{alarm_id}/resolve"),
+    ("GET", "/api/events"),
+    ("GET", "/api/events/status"),
+    ("POST", "/api/events/reconcile"),
+    ("POST", "/api/events/{event_id}/replay"),
     ("GET", "/api/audit"),
 )
 
@@ -521,6 +525,37 @@ class ApiRouter:
             params["alarm_id"], body.get("operator"), body.get("note")
         )
         return {"alarm": serializers.alarm_view(alarm)}
+
+    def _handle_GET_api_events(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        status = _first(query, "status")
+        limit = _optional_int(_first(query, "limit"), field="limit", default=100, minimum=1, maximum=1000)
+        events = self.registry.events.outbox.list_events(status=status, limit=limit)
+        return {"events": events, "count": len(events)}
+
+    def _handle_GET_api_events_status(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        report = self.registry.events.match_report()
+        report["relay"] = self.registry.events.relay.status()
+        return report
+
+    def _handle_POST_api_events_reconcile(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {"report": self.registry.events.reconcile()}
+
+    def _handle_POST_api_events_event_id_replay(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        event_id = params["event_id"]
+        if self.registry.events.outbox.get(event_id) is None:
+            raise NotFoundError("发件箱事件不存在", event_id=event_id)
+        revived = self.registry.events.outbox.replay_dead(event_id)
+        if revived:
+            self.registry.events.relay.notify()
+        return {"revived": revived, "event": self.registry.events.outbox.get(event_id)}
 
     def _handle_GET_api_audit(
         self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]

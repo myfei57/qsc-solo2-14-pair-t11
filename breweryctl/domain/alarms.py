@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from ..core.clock import Clock, format_moment
 from ..core.errors import ConflictError, NotFoundError, ValidationError
@@ -13,6 +13,9 @@ from .models import Alarm, AlarmSeverity, AlarmStatus
 
 ALARMS = "alarms"
 
+#: 告警生命周期回调：(告警文档, 迁移名 raised/repeated/acknowledged/resolved)。
+AlarmSink = Callable[[dict[str, Any], str], None]
+
 
 class AlarmCenter:
     """集中管理来自各工艺组件的告警。"""
@@ -21,6 +24,27 @@ class AlarmCenter:
         self.store = store
         self.clock = clock
         self.alarms = store.collection(ALARMS)
+        self._sink: AlarmSink | None = None
+
+    def set_sink(self, sink: AlarmSink | None) -> None:
+        """挂接告警生命周期发布回调。"""
+
+        self._sink = sink
+
+    def _dispatch(self, alarm: dict[str, Any], transition: str) -> None:
+        """把已落盘的告警迁移交给发布回调；回调异常不得影响业务操作。"""
+
+        sink = self._sink
+        if sink is None:
+            return
+        try:
+            sink(alarm, transition)
+        except Exception:  # noqa: BLE001 - 外发链路故障不能反向打挂告警处理
+            import logging
+
+            logging.getLogger("breweryctl.events").exception(
+                "告警事件发布失败 alarm=%s transition=%s", alarm.get("id"), transition
+            )
 
     def raise_alarm(
         self,
@@ -55,7 +79,9 @@ class AlarmCenter:
                 merged_context["repeat_count"] = int(merged_context.get("repeat_count", 1)) + 1
                 return merge_documents(document, [("context", merged_context)])
 
-            return self.alarms.update(str(existing["id"]), repeat)
+            updated = self.alarms.update(str(existing["id"]), repeat)
+            self._dispatch(updated, "repeated")
+            return updated
         now = format_moment(self.clock.now())
         alarm = Alarm(
             id=new_id("alarm"),
@@ -69,7 +95,9 @@ class AlarmCenter:
             context=dict(context or {}),
             raised_at=now,
         )
-        return self.alarms.put(alarm.id, alarm.to_doc())
+        document = self.alarms.put(alarm.id, alarm.to_doc())
+        self._dispatch(document, "raised")
+        return document
 
     def acknowledge(self, alarm_id: str, operator: str) -> dict[str, Any]:
         """确认告警，表示操作员已经看到。"""
@@ -92,7 +120,9 @@ class AlarmCenter:
             )
 
         with self.store.locks.guard(f"alarm:{alarm_id}"):
-            return self.alarms.update(alarm_id, mutate)
+            updated = self.alarms.update(alarm_id, mutate)
+        self._dispatch(updated, "acknowledged")
+        return updated
 
     def resolve(self, alarm_id: str, operator: str, note: str) -> dict[str, Any]:
         """解除告警；闩锁告警必须先确认。"""
@@ -120,7 +150,11 @@ class AlarmCenter:
             )
 
         with self.store.locks.guard(f"alarm:{alarm_id}"):
-            return self.alarms.update(alarm_id, mutate)
+            was_resolved = self.get(alarm_id).get("status") == AlarmStatus.RESOLVED.value
+            updated = self.alarms.update(alarm_id, mutate)
+        if not was_resolved:
+            self._dispatch(updated, "resolved")
+        return updated
 
     def get(self, alarm_id: str) -> dict[str, Any]:
         """读取单条告警。"""

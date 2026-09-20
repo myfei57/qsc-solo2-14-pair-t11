@@ -27,6 +27,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-dir", default=None, help="数据目录")
     parser.add_argument("--log-level", default=None, choices=("DEBUG", "INFO", "WARNING", "ERROR"))
     parser.add_argument("--no-fsync", action="store_true", help="关闭落盘 fsync，仅用于调试")
+    parser.add_argument("--event-endpoint", default=None, help="关键工艺事件外发地址（也可用 BREWERYCTL_EVENT_ENDPOINT）")
+    parser.add_argument("--event-token", default=None, help="事件外发 Bearer 令牌")
+    parser.add_argument("--no-event-relay", action="store_true", help="禁用事件后台中继（事件仍会入箱垫传）")
     return parser
 
 
@@ -61,7 +64,11 @@ def _settings_from_args(args: argparse.Namespace) -> Settings:
         "host": args.host,
         "port": args.port,
         "log_level": args.log_level,
+        "event_endpoint": args.event_endpoint,
+        "event_token": args.event_token,
     }
+    if args.no_event_relay:
+        overrides["event_relay_enabled"] = False
     if args.data_dir is not None:
         overrides["data_dir"] = Path(args.data_dir)
     if args.no_fsync:

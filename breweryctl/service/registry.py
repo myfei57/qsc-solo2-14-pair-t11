@@ -18,6 +18,9 @@ from ..domain.ns import NamespaceRegistry
 from ..domain.recipe import RecipeRegistry
 from ..domain.temp import TemperatureController
 from ..domain.wort import WortSystem
+from ..events.hub import EventHub
+from ..events.relay import EventRelay
+from ..events.transport import HttpEventTransport
 from ..persistence.store import FileStore
 from .brewing import BrewingService
 from .control import ControlService
@@ -65,6 +68,43 @@ class ComponentRegistry:
         self.control = ControlService(self.temp, self.co2, self.alarms, self.audit)
         self.telemetry = TelemetryService(self.temp, self.alarms, self.audit)
         self.maintenance = MaintenanceService(self.cip, self.tanks, self.audit)
+        self.events = self._build_event_hub()
+
+    def _build_event_hub(self) -> EventHub:
+        """组装事件枢纽与中继，并把发布点接到审计与告警中心。"""
+
+        transport = None
+        if self.settings.event_endpoint:
+            transport = HttpEventTransport(
+                self.settings.event_endpoint,
+                token=self.settings.event_token,
+                timeout_s=self.settings.event_timeout_s,
+            )
+        relay = EventRelay(
+            outbox=None,
+            transport=transport,
+            clock=self.clock,
+            batch_size=self.settings.event_batch_size,
+            retry_base_s=self.settings.event_retry_base_s,
+            retry_max_s=self.settings.event_retry_max_s,
+            stale_claim_s=self.settings.event_stale_claim_s,
+        )
+        hub = EventHub(self.store, self.clock, relay=relay)
+        relay.outbox = hub.outbox
+        self.audit.set_sink(hub.publish_audit)
+        self.alarms.set_sink(hub.publish_alarm)
+        return hub
+
+    def start_relay(self) -> None:
+        """启动事件外发中继（仅在配置了端点且启用时生效）。"""
+
+        if self.settings.event_relay_enabled:
+            self.events.relay.start()  # type: ignore[union-attr]
+
+    def stop_relay(self) -> None:
+        """关停事件外发中继。"""
+
+        self.events.relay.stop()  # type: ignore[union-attr]
 
     def bootstrap(self) -> dict[str, Any]:
         """确保存在可运行的默认命名空间、罐体、探头与配方。"""
@@ -108,6 +148,8 @@ class ComponentRegistry:
             created["recipe"] = recipe["id"]
         created["recovered"] = self.brewing.recover()
         self.store.set_meta("booted_at", format_moment(self.clock.now()))
+        # 与本地审计/告警记录对账，把断装或升级前漏发的关键事件补进发件箱。
+        created["events_reconciled"] = self.events.reconcile()
         return created
 
     def state_overview(self) -> dict[str, Any]:
@@ -132,12 +174,14 @@ class ComponentRegistry:
             "control": self.control.summary(),
             "alarms": self.alarms.summary(),
             "audit_entries": self.audit.count(),
+            "events": self.events.relay.status(),
             "tanks": self.tanks.list_tanks(),
         }
 
     def close(self) -> None:
-        """关闭存储并落盘。"""
+        """停止中继并关闭存储落盘。"""
 
+        self.stop_relay()
         self.store.close()
 
     def _seed_recipe(self, brewery_id: str) -> dict[str, Any]:
