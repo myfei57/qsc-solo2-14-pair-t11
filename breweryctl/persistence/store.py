@@ -167,6 +167,31 @@ class FileStore:
             self._sequence += 1
             return self.journal.append(self._sequence, kind, payload)
 
+    def next_sequence(self) -> int:
+        """在写锁内分配并落库一个新的全局单调序号。
+
+        发件箱用它给待发事件排序：序号与业务动作同源自增序列，
+        断网恢复后续传顺序与本地提交顺序一致。
+        """
+
+        with self._write_lock:
+            self._sequence += 1
+            self.journal.append(
+                self._sequence,
+                "sequence.tick",
+                {"purpose": "outbox_order"},
+            )
+            return self._sequence
+
+    def increment_meta_counter(self, key: str) -> int:
+        """在同一写锁、同一次快照内自增一个元数据计数器。"""
+
+        with self._write_lock:
+            current = int(self._meta.get(key, 0) or 0) + 1
+            self._meta[key] = current
+            self._write_snapshot()
+            return current
+
     def events(self, limit: int = 50) -> list[dict[str, Any]]:
         """返回最近的日志事件。"""
 

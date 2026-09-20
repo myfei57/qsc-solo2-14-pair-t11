@@ -52,6 +52,7 @@ class Application:
         self.bootstrap()
         LOGGER.info("BreweryCtl 启动，数据目录 %s", self.settings.data_dir)
         try:
+            self.registry.start_relay()
             self.server.start()
             host, port = self.server.address
             LOGGER.info("控制台地址 http://%s:%s", host, port)

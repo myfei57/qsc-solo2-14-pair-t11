@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..core.clock import Clock, format_moment
 from ..core.errors import ConflictError, NotFoundError, ValidationError
@@ -11,15 +11,24 @@ from ..core.validators import require_choice, require_text
 from ..persistence.store import FileStore, merge_documents
 from .models import Alarm, AlarmSeverity, AlarmStatus
 
+if TYPE_CHECKING:
+    from ..outbound.publisher import EventPublisher
+
 ALARMS = "alarms"
 
 
 class AlarmCenter:
     """集中管理来自各工艺组件的告警。"""
 
-    def __init__(self, store: FileStore, clock: Clock) -> None:
+    def __init__(
+        self,
+        store: FileStore,
+        clock: Clock,
+        publisher: "EventPublisher | None" = None,
+    ) -> None:
         self.store = store
         self.clock = clock
+        self.publisher = publisher
         self.alarms = store.collection(ALARMS)
 
     def raise_alarm(
@@ -69,12 +78,16 @@ class AlarmCenter:
             context=dict(context or {}),
             raised_at=now,
         )
-        return self.alarms.put(alarm.id, alarm.to_doc())
+        document = self.alarms.put(alarm.id, alarm.to_doc())
+        if self.publisher is not None:
+            self.publisher.publish_alarm(document, event_suffix="raised")
+        return document
 
     def acknowledge(self, alarm_id: str, operator: str) -> dict[str, Any]:
         """确认告警，表示操作员已经看到。"""
 
         clean_operator = require_text(operator, field="operator", max_length=60)
+        prior = self.get(alarm_id)
 
         def mutate(document: dict[str, Any]) -> dict[str, Any]:
             if document.get("status") == AlarmStatus.RESOLVED.value:
@@ -92,7 +105,13 @@ class AlarmCenter:
             )
 
         with self.store.locks.guard(f"alarm:{alarm_id}"):
-            return self.alarms.update(alarm_id, mutate)
+            updated = self.alarms.update(alarm_id, mutate)
+        if (
+            self.publisher is not None
+            and prior.get("status") == AlarmStatus.ACTIVE.value
+        ):
+            self.publisher.publish_alarm(updated, event_suffix="acknowledged")
+        return updated
 
     def resolve(self, alarm_id: str, operator: str, note: str) -> dict[str, Any]:
         """解除告警；闩锁告警必须先确认。"""
@@ -119,8 +138,16 @@ class AlarmCenter:
                 ],
             )
 
+        prior = self.get(alarm_id)
         with self.store.locks.guard(f"alarm:{alarm_id}"):
-            return self.alarms.update(alarm_id, mutate)
+            updated = self.alarms.update(alarm_id, mutate)
+        if (
+            self.publisher is not None
+            and prior.get("status") != AlarmStatus.RESOLVED.value
+            and updated.get("status") == AlarmStatus.RESOLVED.value
+        ):
+            self.publisher.publish_alarm(updated, event_suffix="resolved")
+        return updated
 
     def get(self, alarm_id: str) -> dict[str, Any]:
         """读取单条告警。"""

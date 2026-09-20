@@ -28,6 +28,13 @@ class Settings:
     pressure_limit_bar: float = 1.8
     hop_window_slack_min: float = 5.0
     log_level: str = "INFO"
+    # 关键事件外发
+    outbound_enabled: bool = False
+    outbound_endpoint: str = ""
+    outbound_token: str = ""
+    outbound_reconcile_endpoint: str = ""
+    outbound_batch_size: int = 32
+    outbound_idle_sec: float = 2.0
 
     def validate(self) -> "Settings":
         """校验配置取值并返回自身，便于启动时链式调用。"""
@@ -42,6 +49,12 @@ class Settings:
         require_number(self.hop_window_slack_min, field="hop_window_slack_min", minimum=0.0, maximum=60.0)
         if self.log_level.upper() not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
             raise ValidationError("log_level 取值不合法", field="log_level", value=self.log_level)
+        if self.outbound_enabled:
+            require_text(self.outbound_endpoint, field="outbound_endpoint", max_length=300)
+            if not self.outbound_endpoint.startswith(("http://", "https://")):
+                raise ValidationError("outbound_endpoint 必须是 http(s) 地址")
+        require_int(self.outbound_batch_size, field="outbound_batch_size", minimum=1, maximum=500)
+        require_number(self.outbound_idle_sec, field="outbound_idle_sec", minimum=0.1, maximum=300.0)
         return self
 
     def ensure_layout(self) -> dict[str, str]:
@@ -77,6 +90,11 @@ class Settings:
             "pressure_limit_bar": self.pressure_limit_bar,
             "hop_window_slack_min": self.hop_window_slack_min,
             "log_level": self.log_level.upper(),
+            "outbound_enabled": self.outbound_enabled,
+            "outbound_endpoint": self.outbound_endpoint,
+            "outbound_reconcile_endpoint": self.outbound_reconcile_endpoint,
+            "outbound_batch_size": self.outbound_batch_size,
+            "outbound_idle_sec": self.outbound_idle_sec,
         }
 
     @classmethod
@@ -111,4 +129,17 @@ class Settings:
         fsync = os.environ.get(ENV_PREFIX + "FSYNC")
         if fsync is not None:
             values["fsync"] = fsync.strip().lower() not in {"0", "false", "no"}
+        for key in ("outbound_endpoint", "outbound_token", "outbound_reconcile_endpoint"):
+            raw = os.environ.get(ENV_PREFIX + key.upper())
+            if raw is not None:
+                values[key] = raw
+        enabled = os.environ.get(ENV_PREFIX + "OUTBOUND_ENABLED")
+        if enabled is not None:
+            values["outbound_enabled"] = enabled.strip().lower() not in {"0", "false", "no"}
+        raw_batch = os.environ.get(ENV_PREFIX + "OUTBOUND_BATCH_SIZE")
+        if raw_batch is not None:
+            values["outbound_batch_size"] = int(raw_batch)
+        raw_idle = os.environ.get(ENV_PREFIX + "OUTBOUND_IDLE_SEC")
+        if raw_idle is not None:
+            values["outbound_idle_sec"] = float(raw_idle)
         return base.with_overrides(**values)

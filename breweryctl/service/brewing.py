@@ -22,6 +22,7 @@ from ..domain.recipe import RecipeRegistry
 from ..domain.temp import TemperatureController
 from ..domain.wort import WortSystem
 from ..persistence.store import FileStore, merge_documents
+from ..outbound.publisher import EventPublisher
 
 BATCHES = "batches"
 
@@ -45,6 +46,7 @@ class BrewingService:
         co2: CO2Controller,
         alarms: AlarmCenter,
         audit: AuditLog,
+        publisher: EventPublisher | None = None,
     ) -> None:
         self.store = store
         self.settings = settings
@@ -60,6 +62,7 @@ class BrewingService:
         self.co2 = co2
         self.alarms = alarms
         self.audit = audit
+        self.publisher = publisher or EventPublisher()
         self.batches = store.collection(BATCHES)
 
     def create_batch(
@@ -103,7 +106,7 @@ class BrewingService:
             self.namespaces.release_slot(brewery_id, batch_id)
             self.batches.delete(batch_id)
             raise
-        self.audit.record(
+        entry = self.audit.record(
             brewery_id,
             batch_id,
             clean_actor,
@@ -114,6 +117,20 @@ class BrewingService:
                 "volume_l": volume,
                 "code": batch.code,
             },
+        )
+        self.publisher.publish_from_audit(
+            "batch.created",
+            audit_id=str(entry["id"]),
+            brewery_id=brewery_id,
+            batch_id=batch_id,
+            detail={
+                "recipe_id": recipe_id,
+                "recipe_version": content["version"],
+                "volume_l": volume,
+                "code": batch.code,
+                "priority": clean_priority,
+            },
+            actor=clean_actor,
         )
         return self.status(batch_id)
 
@@ -455,12 +472,21 @@ class BrewingService:
         return self.batches.put(str(batch["id"]), merged)
 
     def _audit(self, batch: dict[str, Any], actor: str, action: str, detail: dict[str, Any]) -> None:
-        self.audit.record(
+        entry = self.audit.record(
             str(batch["brewery_id"]),
             str(batch["id"]),
             actor,
             action,
             detail,
+        )
+        # 关键工艺动作与审计同源自登记，event_id 复用审计 id 保证生产侧幂等。
+        self.publisher.publish_from_audit(
+            action,
+            audit_id=str(entry["id"]),
+            brewery_id=str(batch["brewery_id"]),
+            batch_id=str(batch["id"]),
+            detail=detail,
+            actor=actor,
         )
 
     def mash_step_names(self, recipe_id: str) -> list[str]:

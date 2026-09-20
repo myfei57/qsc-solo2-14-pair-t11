@@ -69,6 +69,11 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("POST", "/api/alarms/{alarm_id}/ack"),
     ("POST", "/api/alarms/{alarm_id}/resolve"),
     ("GET", "/api/audit"),
+    ("GET", "/api/outbound/status"),
+    ("GET", "/api/outbound/events"),
+    ("POST", "/api/outbound/flush"),
+    ("POST", "/api/outbound/reconcile"),
+    ("POST", "/api/outbound/events/{event_id}/revive"),
 )
 
 
@@ -529,6 +534,54 @@ class ApiRouter:
         limit = _optional_int(_first(query, "limit"), field="limit", default=100, minimum=1, maximum=1000)
         entries = self.registry.audit.history(batch_id=batch_id, limit=limit)
         return {"entries": entries, "count": len(entries)}
+
+    def _handle_GET_api_outbound_status(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.registry.outbound_overview()
+
+    def _handle_GET_api_outbound_events(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        status = _first(query, "status")
+        batch_id = _first(query, "batch_id")
+        limit = _optional_int(_first(query, "limit"), field="limit", default=200, minimum=1, maximum=2000)
+        events = self.registry.outbox.list_events(
+            status=status, batch_id=batch_id, limit=limit
+        )
+        return {
+            "events": events,
+            "count": len(events),
+            "stats": self.registry.outbox.stats(),
+        }
+
+    def _handle_POST_api_outbound_flush(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        return self.registry.flush_outbox()
+
+    def _handle_POST_api_outbound_reconcile(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        batch_id = body.get("batch_id") if isinstance(body.get("batch_id"), str) else None
+        client = self.registry.reconcile_client
+        if client is None:
+            report = self.registry.reconciler.local_check(batch_id=batch_id)
+            return {"scope": "local", "report": report.as_dict()}
+        report = self.registry.reconciler.remote_check(client, batch_id=batch_id)
+        requeued = 0
+        if report.missing_remote:
+            requeued = self.registry.reconciler.requeue_missing(report)
+            self.registry.relay.kick() if self.registry.relay else None
+        return {"scope": "remote", "requeued": requeued, "report": report.as_dict()}
+
+    def _handle_POST_api_outbound_events_event_id_revive(
+        self, params: dict[str, str], query: dict[str, list[str]], body: dict[str, Any]
+    ) -> dict[str, Any]:
+        event = self.registry.outbox.revive(params["event_id"])
+        if self.registry.relay is not None:
+            self.registry.relay.kick()
+        return {"event": event}
 
 
 def _handler_name(method: str, pattern: str) -> str:

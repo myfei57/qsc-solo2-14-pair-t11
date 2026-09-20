@@ -18,6 +18,11 @@ from ..domain.ns import NamespaceRegistry
 from ..domain.recipe import RecipeRegistry
 from ..domain.temp import TemperatureController
 from ..domain.wort import WortSystem
+from ..outbound.outbox import Outbox
+from ..outbound.publisher import EventPublisher
+from ..outbound.reconcile import HttpReconcileClient, Reconciler
+from ..outbound.relay import OutboxRelay
+from ..outbound.transport import HttpTransport
 from ..persistence.store import FileStore
 from .brewing import BrewingService
 from .control import ControlService
@@ -32,7 +37,42 @@ class ComponentRegistry:
         self.settings = settings.validate()
         self.clock = clock or SystemClock()
         self.store = FileStore(self.settings.data_dir, self.clock, fsync=self.settings.fsync).open()
-        self.alarms = AlarmCenter(self.store, self.clock)
+        # 外发组件：未启用时只有发件箱落库、不启动网络中继，
+        # 关键事件仍完整垫在本地，可事后补传或导出。
+        self.outbox = Outbox(self.store, self.clock)
+        self.publisher = EventPublisher(self.outbox)
+        self.transport = (
+            HttpTransport(
+                self.settings.outbound_endpoint,
+                token=self.settings.outbound_token or None,
+            )
+            if self.settings.outbound_enabled
+            else None
+        )
+        self.relay = (
+            OutboxRelay(
+                self.outbox,
+                self.transport,  # type: ignore[arg-type]
+                self.clock,
+                batch_size=self.settings.outbound_batch_size,
+                idle_interval_sec=self.settings.outbound_idle_sec,
+            )
+            if self.transport is not None
+            else None
+        )
+        self.reconciler = Reconciler(self.outbox)
+        self.reconcile_client = (
+            HttpReconcileClient(
+                self.settings.outbound_reconcile_endpoint,
+                token=self.settings.outbound_token or None,
+            )
+            if self.settings.outbound_enabled
+            and self.settings.outbound_reconcile_endpoint
+            else None
+        )
+        if self.relay is not None:
+            self.publisher.bind_relay(self.relay)
+        self.alarms = AlarmCenter(self.store, self.clock, self.publisher)
         self.audit = AuditLog(self.store, self.clock)
         self.namespaces = NamespaceRegistry(self.store, self.settings, self.clock)
         self.recipes = RecipeRegistry(self.store, self.clock)
@@ -61,6 +101,7 @@ class ComponentRegistry:
             self.co2,
             self.alarms,
             self.audit,
+            self.publisher,
         )
         self.control = ControlService(self.temp, self.co2, self.alarms, self.audit)
         self.telemetry = TelemetryService(self.temp, self.alarms, self.audit)
@@ -117,6 +158,7 @@ class ComponentRegistry:
         return {
             "settings": self.settings.describe(),
             "store": self.store.stats(),
+            "outbound": self.outbound_overview(),
             "namespace": self.namespaces.describe(),
             "recipes": {
                 "total": len(recipes),
@@ -135,9 +177,43 @@ class ComponentRegistry:
             "tanks": self.tanks.list_tanks(),
         }
 
+    def start_relay(self) -> None:
+        """启动后台外发中继；未配置外发地址时为空操作。"""
+
+        if self.relay is not None:
+            # 启动前先尝试追平历史积压，避免新事件排在旧事件后面等轮询。
+            self.relay.start()
+
+    def stop_relay(self) -> None:
+        """停止后台外发中继。"""
+
+        if self.relay is not None:
+            self.relay.stop()
+
+    def flush_outbox(self) -> dict[str, Any]:
+        """同步把积压事件发完（供测试、CLI 与启动恢复使用）。"""
+
+        if self.relay is None:
+            return {"enabled": False, **self.outbox.stats()}
+        result = self.relay.drain()
+        return {"enabled": True, **result.as_dict(), "outbox": self.outbox.stats()}
+
+    def outbound_overview(self) -> dict[str, Any]:
+        """外发子系统状态摘要。"""
+
+        overview = {
+            "enabled": self.settings.outbound_enabled,
+            "endpoint": self.settings.outbound_endpoint or None,
+            "outbox": self.outbox.stats(),
+        }
+        if self.relay is not None:
+            overview["relay"] = self.relay.status()
+        return overview
+
     def close(self) -> None:
         """关闭存储并落盘。"""
 
+        self.stop_relay()
         self.store.close()
 
     def _seed_recipe(self, brewery_id: str) -> dict[str, Any]:
